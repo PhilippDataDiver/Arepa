@@ -119,15 +119,38 @@ const TRACKS={
     bass:[N.C3,0,N.G3,0, N.C3,0,N.G3,0, N.F3,0,N.C3,0, N.G3,0,N.G3,0],
     lead:[N.C5,N.E5,N.G5,N.E5, N.C5,N.E5,N.G5,0, N.A4,N.C5,N.E5,N.C5, N.G4,N.B4,N.D5,N.G5]}
 };
-const music={track:TRACKS.home, step:0, nextT:0};
-function setMusic(name){ music.track=TRACKS[name]||null; music.step=0; if(AC)music.nextT=AC.currentTime+0.05; }
+let noiseBuf=null;
+function ensureNoise(){ if(AC&&!noiseBuf){ noiseBuf=AC.createBuffer(1,Math.floor(AC.sampleRate*0.3),AC.sampleRate); const d=noiseBuf.getChannelData(0); for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1; } }
+function perc(kind,time,vol,freq){ if(!AC||muted)return; ensureNoise();
+  if(kind==='kick'){ const o=AC.createOscillator(),g=AC.createGain(); o.type='sine'; o.frequency.setValueAtTime(155,time); o.frequency.exponentialRampToValueAtTime(52,time+0.12); g.gain.setValueAtTime(vol,time); g.gain.exponentialRampToValueAtTime(0.0005,time+0.17); o.connect(g);g.connect(AC.destination);o.start(time);o.stop(time+0.2); }
+  else if(kind==='clave'){ const o=AC.createOscillator(),g=AC.createGain(); o.type='square'; o.frequency.setValueAtTime(2100,time); g.gain.setValueAtTime(vol,time); g.gain.exponentialRampToValueAtTime(0.0005,time+0.05); o.connect(g);g.connect(AC.destination);o.start(time);o.stop(time+0.06); }
+  else if(kind==='conga'){ const o=AC.createOscillator(),g=AC.createGain(); o.type='sine'; const f=freq||250; o.frequency.setValueAtTime(f,time); o.frequency.exponentialRampToValueAtTime(f*0.68,time+0.1); g.gain.setValueAtTime(vol,time); g.gain.exponentialRampToValueAtTime(0.0005,time+0.13); o.connect(g);g.connect(AC.destination);o.start(time);o.stop(time+0.15); }
+  else if(kind==='shaker'){ const s=AC.createBufferSource();s.buffer=noiseBuf; const f=AC.createBiquadFilter();f.type='highpass';f.frequency.value=6500; const g=AC.createGain(); g.gain.setValueAtTime(vol,time); g.gain.exponentialRampToValueAtTime(0.0005,time+0.05); s.connect(f);f.connect(g);g.connect(AC.destination); s.start(time);s.stop(time+0.07); }
+}
+// rhythm styles (16 sixteenth-steps). clave = 3-2 son clave.
+const RHY={
+  soft:    {kick:[0,8], clave:[3,10], conga:[14], shaker:[2,6,10,14], kv:.30,cv:.12,clv:.07,sv:.035},
+  cumbia:  {kick:[0,8], clave:[0,3,6,10,12], conga:[6,7,14,15], shaker:[0,2,4,6,8,10,12,14], kv:.40,cv:.17,clv:.10,sv:.05},
+  cumbiaUp:{kick:[0,4,8,12], clave:[0,3,6,10,12], conga:[6,7,14,15], shaker:[0,2,4,6,8,10,12,14], kv:.36,cv:.17,clv:.10,sv:.05},
+  salsa:   {kick:[0,4,8,12], clave:[0,3,6,10,12], conga:[2,3,6,7,10,11,14,15], shaker:[0,2,4,6,8,10,12,14], kv:.34,cv:.16,clv:.11,sv:.05},
+  festive: {kick:[0,2,4,6,8,10,12,14], clave:[0,3,6,10,12], conga:[2,3,6,7,10,11,14,15], shaker:[0,2,4,6,8,10,12,14], kv:.32,cv:.17,clv:.12,sv:.06}
+};
+const SCENE_RHY={home:'soft',snake:'salsa',cornfield:'cumbia',mountains:'cumbiaUp',lake:'soft',mila:'salsa',ratqueso:'cumbia',literature:'soft',cookie:'cumbia',kitchen:'salsa',end:'festive'};
+const SCENE_PV={home:.6,snake:1,cornfield:.9,mountains:.8,lake:.4,mila:.95,ratqueso:.9,literature:.45,cookie:.85,kitchen:1,end:1};
+const music={track:TRACKS.home, rhythm:SCENE_RHY.home, pv:SCENE_PV.home, step:0, nextT:0};
+function setMusic(name){ music.track=TRACKS[name]||null; music.rhythm=SCENE_RHY[name]||null; music.pv=(SCENE_PV[name]==null?0.7:SCENE_PV[name]); music.step=0; if(AC)music.nextT=AC.currentTime+0.05; }
 function musicTick(){ if(!AC||muted||!music.track)return;
   if(music.nextT<AC.currentTime) music.nextT=AC.currentTime+0.05;
-  const tr=music.track;
-  while(music.nextT<AC.currentTime+0.2){ const s=music.step%16;
-    if(tr.bass[s]) tone(tr.bass[s], tr.spb*0.95, tr.btype, tr.bvol, music.nextT);
-    if(tr.lead[s]) tone(tr.lead[s], tr.spb*0.8, tr.ltype, tr.lvol, music.nextT);
-    music.nextT+=tr.spb; music.step++; } }
+  const tr=music.track, R=RHY[music.rhythm], pv=music.pv;
+  while(music.nextT<AC.currentTime+0.2){ const s=music.step%16, t=music.nextT;
+    if(tr.bass[s]) tone(tr.bass[s], tr.spb*0.95, tr.btype, tr.bvol, t);
+    if(tr.lead[s]) tone(tr.lead[s], tr.spb*0.8, tr.ltype, tr.lvol, t);
+    if(R){ if(R.kick.includes(s))perc('kick',t,R.kv*pv);
+      if(R.clave.includes(s))perc('clave',t,R.clv*pv);
+      if(R.conga.includes(s))perc('conga',t,R.cv*pv,(s%2?300:230));
+      if(R.shaker.includes(s))perc('shaker',t,(s%4===2?R.sv*1.7:R.sv)*pv); }
+    music.nextT+=tr.spb; music.step++; }
+}
 setInterval(musicTick,40);
 
 const G={scene:'home', inv:[], flags:{}, t:0, hotspots:[], queue:[], onDone:null, mini:null, ptr:{x:450,y:300}, down:false};
@@ -424,7 +447,10 @@ function startRhythm(){
       if(cand&&cd<0.22){ cand.judged=true; if(cd<0.08){cand.res='PERFECT';hits++;combo++;SFX.perfect();} else {cand.res='GOOD';hits++;combo++;SFX.good();} best=Math.max(best,combo); last=cand.res; lastT=t; }
       else { combo=0; SFX.bad(); last='MISS'; lastT=t; } },
     update(){ const t=now();
-      while(nextBeat<t+0.12){ tone(120,0.12,'sine',0.22,nextBeat); tone(820,0.03,'square',0.05,nextBeat); nextBeat+=beat; }
+      while(nextBeat<t+0.12){ const half=nextBeat+beat/2;
+        perc('kick',nextBeat,0.40); perc('clave',nextBeat,0.10); perc('shaker',nextBeat,0.05);
+        perc('conga',half,0.16,260); perc('shaker',half,0.07);
+        nextBeat+=beat; }
       for(const n of notes){ if(!n.judged&&t>n.hit+0.22){ n.judged=true; n.res='MISS'; combo=0; last='MISS'; lastT=t; } }
       const end=notes[notes.length-1].hit+1.0;
       if(t>end){ const need=10;
